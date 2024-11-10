@@ -1,0 +1,203 @@
+---
+title: "p8105 HW5 jw4693"
+author: "Jianming Wang"
+date: 2024-11-8
+output: 
+  github_document
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+set.seed(1)
+```
+
+# Problem 1
+## birthday function
+```{r}
+bday_sim <- function(n){
+bdays = sample(1:365, size = n, replace = T)
+duplicate = length(unique(bdays))<n
+return(duplicate)
+}
+```
+
+## iteration for different group size
+```{r}
+sim_res = 
+  expand_grid(
+    n = 2:50,
+    iter = 1:10000
+  )|>
+  mutate(res = map_lgl(n, bday_sim))|>
+  group_by(n)|>
+  summarise(prob = mean(res))
+```
+
+## plot for probability
+```{r}
+sim_res|>
+  ggplot(aes(x = n, y = prob))+
+  geom_line()+
+  labs(
+    x = "Group Size",
+    y = "Probability of Shared Birthday",
+    title = "Birthday Paradox Simulation"
+  ) +
+  theme_minimal()
+```
+
+The probability increases sharply as the group size increases. Even with a small group of around 23 people, the probability of at least two people sharing a birthday exceeds 50%. With a group size of 50, the probability is very close to 1 (almost certain).
+
+# Problem 2
+## when mu equals 0
+```{r}
+estimates = c()
+p_values = c()
+for (i in 1:5000) {
+    x <- rnorm(30, mean = 0, sd = 5)
+    test_result <- t.test(x, mu = 0)|>
+      broom::tidy()
+    estimates[i] <- test_result$estimate
+    p_values[i] <- test_result$p.value
+  }
+```
+
+## iterations for different mu
+```{r}
+power = c()
+avg_estimate = c()
+avg_estimate_reject = c()
+for (j in 1:6){
+  estimates = c()
+p_values = c()
+for (i in 1:5000) {
+    x <- rnorm(30, mean = j, sd = 5)
+    test_result <- t.test(x, mu = 0)|>
+      broom::tidy()
+    estimates[i] <- test_result$estimate
+    p_values[i] <- test_result$p.value
+}
+power[j] <- mean(p_values < 0.05)
+  avg_estimate[j] <- mean(estimates)
+  avg_estimate_reject[j] <- mean(estimates[p_values < 0.05])
+}
+```
+
+## plot for power in different effect size
+```{r}
+power = data.frame(
+  mu = 1:6,
+  power = power
+)
+```
+
+```{r}
+ggplot(power, aes(x = mu, y = power)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    x = "True Value of μ",
+    y = "Power (Proportion of Null Rejected)",
+    title = "Power of One-Sample t-Test as a Function of Effect Size"
+  ) +
+  theme_minimal()
+```
+
+As the true value of μ increases, the power of the test increases. The power of a one-sample t-test increases with larger effect sizes, demonstrating that stronger effects are easier to detect.
+
+## plot for average estimates in different mu
+```{r}
+estimate <- data.frame(
+  mu = 1:6,
+  avg_estimate = avg_estimate,
+  avg_estimate_reject = avg_estimate_reject
+)
+```
+
+```{r}
+ggplot(estimate, aes(x = mu)) +
+  geom_line(aes(y = avg_estimate, color = "Average Estimate")) +
+  geom_line(aes(y = avg_estimate_reject, color = "Average Estimate (Null Rejected)")) +
+  geom_point(aes(y = avg_estimate, color = "Average Estimate")) +
+  geom_point(aes(y = avg_estimate_reject, color = "Average Estimate (Null Rejected)")) +
+  labs(
+    x = "True Value of μ",
+    y = "Average Estimate of μ^",
+    title = "Average Estimate of μ^ as a Function of Effect Size",
+    color = "Estimate Type"
+  ) +
+  theme_minimal()
+```
+
+The average estimate of μ^ across all samples is close to the true value of μ, showing that the estimator is unbiased. However, the average estimate of μ^ for samples where the null hypothesis is rejected tends to be higher than the true value of μ, especially when the true effect size is small.
+When considering only samples where the null hypothesis is rejected, the estimates tend to be inflated, especially for small effect sizes. This inflation arises because only samples with larger-than-expected estimates will reject the null hypothesis. Thus, interpreting effect sizes from only significant results can be misleading, highlighting the importance of considering the full context of all data in analyses.
+
+# Problem 3
+## load and describe the raw data
+```{r}
+homicides <- read_csv("./homicide-data.csv")|>
+  janitor::clean_names()
+summary(homicides)
+```
+The dataset has `r nrow(homicides)` observations and `r ncol(homicides)` columns. Here’s an outline of the columns available in the dataset:
+* uid: Unique identifier for each case
+* reported_date: Date when the homicide was reported
+* victim_last and victim_first: Last and first names of the victim
+* victim_race: Race of the victim
+* victim_age: Age of the victim
+* victim_sex: Sex of the victim
+* city and state: Location of the incident
+* lat and lon: Latitude and longitude of the incident
+* disposition: Outcome of the case (e.g., "Closed by arrest," "Closed without arrest," "Open/No arrest")
+
+## create city_state variable and summarise
+```{r}
+homicides = homicides|>
+  mutate(city_state = paste(city, state, sep = ", "))
+summ_homicides <- homicides|>
+  group_by(city_state) |>
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  )
+summ_homicides|>knitr::kable()
+```
+
+## perform prop.test
+```{r}
+Baltimore_test = prop.test(summ_homicides[which(summ_homicides$city_state == 'Baltimore, MD'),]$unsolved_homicides, summ_homicides[which(summ_homicides$city_state == 'Baltimore, MD'),]$total_homicides)
+Baltimore_test|>
+  broom::tidy()|>
+  select(estimate, conf.low, conf.high)
+```
+
+```{r}
+prop_test_results <- summ_homicides %>%
+  mutate(
+    prop_test = purrr::map2(unsolved_homicides, total_homicides, 
+                     ~broom::tidy(prop.test(.x, .y))))|>
+  unnest(prop_test)|>
+  select(-statistic, -parameter, -method, -alternative)|>
+  janitor::clean_names()
+prop_test_results|>
+  knitr::kable(digits = 3)
+```
+
+## plot for estimates and CIs
+```{r}
+ggplot(prop_test_results, aes(x = reorder(city_state, estimate), y = estimate, color = city_state)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Proportion of Unsolved Homicides by City",
+    x = "City",
+    y = "Estimated Proportion of Unsolved Homicides"
+  ) +
+  theme_minimal()+
+  theme(legend.position = 'none')
+```
+
+The plot shows the estimated proportion of unsolved homicides for each city, along with 95% confidence intervals. Cities are sorted in decreasing order by the proportion of unsolved cases.
+
