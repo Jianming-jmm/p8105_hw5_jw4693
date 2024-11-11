@@ -60,7 +60,14 @@ for (i in 1:5000) {
       broom::tidy()
     estimates[i] <- test_result$estimate
     p_values[i] <- test_result$p.value
-  }
+}
+data.frame(
+  n = 1:5000,
+  estimate = estimates,
+  p_value = p_values
+)|>
+  head()|>
+  knitr::kable()
 ```
 
 ## iterations for different mu
